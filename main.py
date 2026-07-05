@@ -49,3 +49,35 @@ def stats(values: str = Query(...)):
         "max": max(nums),
         "mean": sum(nums) / len(nums),
     }
+
+
+API_KEY = "ak_b777c9etokh2kre2b2ntcj1j"
+
+from fastapi import Header
+
+@app.post("/analytics")
+def analytics(data: dict, x_api_key: str = Header(None)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401)
+
+    events = data["events"]
+
+    users = set()
+    revenue = 0
+    totals = {}
+
+    for e in events:
+        users.add(e["user"])
+        amt = e["amount"]
+
+        if amt > 0:
+            revenue += amt
+            totals[e["user"]] = totals.get(e["user"],0)+amt
+
+    return {
+        "email": EMAIL,
+        "total_events": len(events),
+        "unique_users": len(users),
+        "revenue": revenue,
+        "top_user": max(totals, key=totals.get)
+    }
