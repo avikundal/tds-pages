@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, Request, Response, HTTPException, Header
 import time
 import uuid
 
@@ -13,7 +12,6 @@ app = FastAPI()
 async def middleware(request: Request, call_next):
     start = time.perf_counter()
 
-    # handle preflight directly
     if request.method == "OPTIONS":
         response = Response(status_code=204)
     else:
@@ -24,9 +22,10 @@ async def middleware(request: Request, call_next):
 
     origin = request.headers.get("origin")
 
-    if origin == ALLOWED_ORIGIN:
-        response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    # allow exam browser + Q1 origin
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "*"
 
     return response
@@ -36,6 +35,8 @@ async def middleware(request: Request, call_next):
 def home():
     return {"status": "ok"}
 
+
+# ---------------- Q1 ----------------
 
 @app.get("/stats")
 def stats(values: str = Query(...)):
@@ -51,14 +52,18 @@ def stats(values: str = Query(...)):
     }
 
 
-API_KEY = "ak_b777c9etokh2kre2b2ntcj1j"
+# ---------------- Q5 ----------------
 
-from fastapi import Header
+API_KEY = "ak_b777c9etokh2kre2b2ntcj1j"
 
 @app.post("/analytics")
 def analytics(data: dict, x_api_key: str = Header(None)):
+
     if x_api_key != API_KEY:
-        raise HTTPException(status_code=401)
+        raise HTTPException(
+            status_code=401,
+            detail="invalid api key"
+        )
 
     events = data["events"]
 
@@ -67,17 +72,54 @@ def analytics(data: dict, x_api_key: str = Header(None)):
     totals = {}
 
     for e in events:
-        users.add(e["user"])
-        amt = e["amount"]
+        user = e["user"]
+        amount = e["amount"]
 
-        if amt > 0:
-            revenue += amt
-            totals[e["user"]] = totals.get(e["user"],0)+amt
+        users.add(user)
+
+        if amount > 0:
+            revenue += amount
+            totals[user] = totals.get(user, 0) + amount
 
     return {
         "email": EMAIL,
         "total_events": len(events),
         "unique_users": len(users),
         "revenue": revenue,
-        "top_user": max(totals, key=totals.get)
+        "top_user": max(totals, key=totals.get),
     }
+
+
+# ---------------- Q3 ----------------
+
+@app.get("/effective-config")
+def effective_config(set: list[str] = Query(default=[])):
+
+    config = {
+        "port": 8323,
+        "workers": 4,
+        "debug": False,
+        "log_level": "debug",
+        "api_key": "key-yg65gbhcqr"
+    }
+
+    for item in set:
+        key, value = item.split("=", 1)
+
+        if key in ["port", "workers"]:
+            config[key] = int(value)
+
+        elif key == "debug":
+            config[key] = value.lower() in [
+                "true",
+                "1",
+                "yes",
+                "on"
+            ]
+
+        else:
+            config[key] = value
+
+    config["api_key"] = "****"
+
+    return config
