@@ -17,7 +17,9 @@ async def middleware(request: Request, call_next):
     else:
         response = await call_next(request)
 
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
+    if "X-Request-ID" not in response.headers:
+        incoming_id = request.headers.get("X-Request-ID")
+        response.headers["X-Request-ID"] = incoming_id or str(uuid.uuid4())
     response.headers["X-Process-Time"] = f"{time.perf_counter() - start:.6f}"
 
     origin = request.headers.get("origin")
@@ -173,5 +175,191 @@ def ping(request: Request, response: Response):
         "request_id": request_id
     }
 
+# ---------------- Q6 ----------------
+
+import json
+
+START_TIME = time.time()
+REQUEST_COUNT = 0
+LOGS = []
+
+
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next):
+    global REQUEST_COUNT
+
+    REQUEST_COUNT += 1
+
+    response = await call_next(request)
+
+    LOGS.append({
+        "level": "INFO",
+        "ts": time.time(),
+        "path": request.url.path,
+        "request_id": response.headers.get(
+            "X-Request-ID",
+            str(uuid.uuid4())
+        )
+    })
+
+    if len(LOGS) > 100:
+        LOGS.pop(0)
+
+    return response
+
+
+@app.get("/work")
+def work(n: int = 1):
+    return {
+        "email": EMAIL,
+        "done": n
+    }
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(
+        content=f"http_requests_total {REQUEST_COUNT}\n",
+        media_type="text/plain"
+    )
+
+
+@app.get("/healthz")
+def healthz():
+    return {
+        "status": "ok",
+        "uptime_s": time.time() - START_TIME
+    }
+
+
+@app.get("/logs/tail")
+def logs_tail(limit: int = 10):
+    return LOGS[-limit:]    
     
-    
+
+# ---------------- Q2 OAUTH JWT ----------------
+
+import jwt
+
+PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY
+cxiP/hG8C6Sb9iwg3yiLAA4HCnpITcbWCSelbvbYGuc3EbNy4xFyf5Cbj5DHJMID
+EkryOgyd2giIIIBOUBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNldu6A9cNteNpXc
+WyJjG2axVfmq7i6SuKr1JoWYG7xTTAvKPujSl4OtsQfO3h5NepzdfXpr28oNnzfW
+ed+zclR6BcmNNo/WVfJ4xyCLSf0BCOgdTgW6PdaChd1l9VDetJZVEgC5tkyvXsfI
+SI6iyrYbKR0NEBSqq4XkadEjsCs4F1RncsS4LlgniT7GlkL9Mce3b0wGLs9/7ZIX
+dQIDAQAB
+-----END PUBLIC KEY-----"""
+
+
+@app.post("/verify")
+def verify(data: dict):
+
+    token = data["token"]
+
+    try:
+        payload = jwt.decode(
+            token,
+            PUBLIC_KEY,
+            algorithms=["RS256"],
+            issuer="https://idp.exam.local",
+            audience="tds-5my9dk6o.apps.exam.local"
+        )
+
+        return {
+            "valid": True,
+            "email": payload.get("email"),
+            "sub": payload.get("sub"),
+            "aud": payload.get("aud")
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail={"valid": False}
+        )
+
+
+# ---------------- Q9 ORDERS ----------------
+
+
+ORDERS_TOTAL = 59
+
+created_orders = {}
+order_counter = 1000
+
+rate_limits = collections.defaultdict(list)
+
+
+@app.post("/orders")
+def create_order(
+    request: Request,
+    idempotency_key: str = Header(None)
+):
+    global order_counter
+
+    if idempotency_key in created_orders:
+        return created_orders[idempotency_key]
+
+    order_counter += 1
+
+    order = {
+        "id": str(order_counter)
+    }
+
+    created_orders[idempotency_key] = order
+
+    return Response(
+        content=json.dumps(order),
+        status_code=201,
+        media_type="application/json"
+    )
+
+
+@app.get("/orders")
+def list_orders(
+    request: Request,
+    limit: int = 10,
+    cursor: str = None
+):
+
+    client = request.headers.get(
+        "X-Client-Id",
+        "default"
+    )
+
+    now = time.time()
+
+    rate_limits[client] = [
+        x for x in rate_limits[client]
+        if now-x < 10
+    ]
+
+    if len(rate_limits[client]) >= 20:
+        r = Response(status_code=429)
+        r.headers["Retry-After"] = "10"
+        return r
+
+    rate_limits[client].append(now)
+
+
+    start = int(cursor) if cursor else 1
+
+    end = min(
+        start + limit,
+        ORDERS_TOTAL + 1
+    )
+
+    next_cursor = (
+        str(end)
+        if end <= ORDERS_TOTAL
+        else None
+    )
+
+    return {
+        "items": [
+            {"id": i}
+            for i in range(start,end)
+        ],
+        "next_cursor": next_cursor
+    }
