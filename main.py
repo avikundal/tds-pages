@@ -4,7 +4,7 @@ import time
 import uuid
 
 ALLOWED_ORIGIN = "https://dash-jt6yi0.example.com"
-EMAIL = "avijit.kundal@gmail.com"
+EMAIL = "24f2006551@ds.study.iitm.ac.in"
 
 app = FastAPI()
 
