@@ -123,3 +123,55 @@ def effective_config(set: list[str] = Query(default=[])):
     config["api_key"] = "****"
 
     return config
+
+# ---------------- Q10 ----------------
+
+import collections
+
+MW_ALLOWED_ORIGIN = "https://app-5rn8vj.example.com"
+RATE_LIMIT = 14
+
+rate_store = collections.defaultdict(list)
+
+
+@app.get("/ping")
+def ping(request: Request, response: Response):
+
+    now = time.time()
+
+    # request id handling
+    request_id = request.headers.get("X-Request-ID")
+
+    if not request_id:
+        request_id = str(uuid.uuid4())
+
+    response.headers["X-Request-ID"] = request_id
+
+
+    # rate limit by client id
+    client = request.headers.get(
+        "X-Client-Id",
+        "default"
+    )
+
+    # keep only last 10 seconds
+    rate_store[client] = [
+        t for t in rate_store[client]
+        if now - t < 10
+    ]
+
+    if len(rate_store[client]) >= RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="rate limit"
+        )
+
+    rate_store[client].append(now)
+
+    return {
+        "email": EMAIL,
+        "request_id": request_id
+    }
+
+    
+    
